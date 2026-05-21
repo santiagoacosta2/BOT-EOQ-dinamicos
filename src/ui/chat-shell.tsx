@@ -446,10 +446,38 @@ export const ChatShell = () => {
   // ── localStorage: cargar al montar ──────────────────────────────────────────
   useEffect(() => {
     try {
-      const stored = localStorage.getItem('simplex-conversations');
-      if (stored) setConversations(JSON.parse(stored));
       const dark = localStorage.getItem('simplex-dark');
       if (dark === 'true') setIsDark(true);
+
+      const stored = localStorage.getItem('simplex-conversations');
+      if (!stored) return;
+      const parsedConvs = JSON.parse(stored) as ConvRecord[];
+      setConversations(parsedConvs);
+
+      // Restaurar la conversación que estaba activa antes del refresh.
+      const lastActive = localStorage.getItem('simplex-active-conv');
+      if (!lastActive) return;
+      const activeConv = parsedConvs.find(c => c.id === lastActive);
+      if (!activeConv?.entries || activeConv.entries.length === 0) return;
+
+      setActiveConvId(lastActive);
+      const restoredEntries = activeConv.entries as ChatEntry[];
+      setEntries(restoredEntries);
+
+      // Si la conversación tenía un problema resuelto, recuperar la sessionId
+      // y el último solvePayload para volver a habilitar follow-ups.
+      const lastSolved = [...restoredEntries].reverse().find(
+        (e): e is ChatEntry & { role: 'assistant'; solvePayload: SolvePayload } =>
+          e.role === 'assistant' && !!(e as { solvePayload?: SolvePayload }).solvePayload,
+      );
+      if (lastSolved) {
+        setSessionId(lastSolved.solvePayload.sessionId);
+        setLastSolvePayload(lastSolved.solvePayload);
+        setStep('completed');
+      } else {
+        // Conversación sin problema resuelto (solo preguntas teóricas).
+        setStep('chatting');
+      }
     } catch { /* ignore */ }
   }, []);
 
@@ -464,6 +492,14 @@ export const ChatShell = () => {
       localStorage.setItem('simplex-conversations', JSON.stringify(conversations.slice(0, 12)));
     } catch { /* ignore */ }
   }, [conversations]);
+
+  // ── localStorage: recordar qué conversación está activa ─────────────────────
+  useEffect(() => {
+    try {
+      if (activeConvId) localStorage.setItem('simplex-active-conv', activeConvId);
+      else localStorage.removeItem('simplex-active-conv');
+    } catch { /* ignore */ }
+  }, [activeConvId]);
 
   // ── Sincronizar mensajes en el registro activo ───────────────────────────────
   useEffect(() => {
