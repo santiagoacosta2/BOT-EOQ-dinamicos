@@ -53,7 +53,13 @@ export const P = getPalette(false); // compat
 
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
-type StoredEntry = { id: string; role: 'user' | 'assistant'; text: string };
+type StoredEntry = {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  solvePayload?: SolvePayload;
+  options?: Array<{ label: string; value: string }>;
+};
 type ConvRecord  = { id: string; label: string; ts: number; entries?: StoredEntry[] };
 
 const QUICK_EXAMPLES = [
@@ -462,7 +468,18 @@ export const ChatShell = () => {
   // ── Sincronizar mensajes en el registro activo ───────────────────────────────
   useEffect(() => {
     if (!activeConvId || entries.length === 0) return;
-    const stored: StoredEntry[] = entries.map(e => ({ id: e.id, role: e.role as 'user' | 'assistant', text: e.text }));
+    const stored: StoredEntry[] = entries.map(e => {
+      if (e.role === 'assistant') {
+        return {
+          id: e.id,
+          role: 'assistant',
+          text: e.text,
+          ...(e.solvePayload ? { solvePayload: e.solvePayload } : {}),
+          ...(e.options ? { options: e.options } : {}),
+        };
+      }
+      return { id: e.id, role: 'user', text: e.text };
+    });
     setConversations(prev => prev.map(c => c.id === activeConvId ? { ...c, entries: stored } : c));
   }, [entries, activeConvId]);
 
@@ -504,9 +521,16 @@ export const ChatShell = () => {
   // ── Seleccionar conversación del historial ────────────────────────────────────
   const handleSelectConversation = (id: string) => {
     const conv = conversations.find(c => c.id === id);
+    const restoredEntries = conv?.entries ? (conv.entries as ChatEntry[]) : initialEntries;
+    // Recuperar la sesión del backend desde la última entrada con solvePayload,
+    // para poder seguir haciendo follow-ups sobre la conversación reabierta.
+    const lastSolved = [...restoredEntries].reverse().find(
+      (e): e is ChatEntry & { role: 'assistant'; solvePayload: SolvePayload } =>
+        e.role === 'assistant' && !!(e as { solvePayload?: SolvePayload }).solvePayload,
+    );
     setActiveConvId(id);
-    setEntries(conv?.entries ? (conv.entries as ChatEntry[]) : initialEntries);
-    setSessionId(undefined);
+    setEntries(restoredEntries);
+    setSessionId(lastSolved?.solvePayload.sessionId);
     setError(null);
     setDraft('');
     setStep('completed');
